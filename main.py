@@ -6,10 +6,10 @@ from tqdm import tqdm
 import time
 
 # URL of the webpage containing the files
-base_url = "https://csar.birds.web.id/v1/CSA_08hx000300h/official-table/table2/"
+base_url = "https://csar.birds.web.id/v1/CSA_08hx000300h/official-table/table3/"
 
 # Directory where files will be saved
-download_directory = "downloaded_files/v1/CSA_08hx000300h/official-table/table2/"
+download_directory = "downloaded_files/v1/CSA_08hx000300h/official-table/table3/"
 
 # Create the directory if it doesn't exist
 if not os.path.exists(download_directory):
@@ -30,7 +30,7 @@ def clean_directory_name(name):
     return cleaned_name
 
 
-# Function to download and save a file with a progress bar
+# Function to download and save a file with support for resuming
 def download_file(file_url, folder):
     file_name = clean_filename(file_url)
 
@@ -40,7 +40,7 @@ def download_file(file_url, folder):
 
     file_path = os.path.join(folder, file_name)
 
-    # Send a HEAD request to get the file size on the server
+    # Send a HEAD request to get the total file size on the server
     response = requests.head(file_url)
 
     if response.status_code != 200:
@@ -50,25 +50,41 @@ def download_file(file_url, folder):
     # Get the size of the file from the server
     server_file_size = int(response.headers.get("content-length", 0))
 
-    # Check if the file already exists locally and its size matches
+    # Check if the file already exists locally
     if os.path.exists(file_path):
         local_file_size = os.path.getsize(file_path)
 
         if local_file_size == server_file_size:
             print(f"File already fully downloaded: {file_name}, skipping download.")
             return
+        elif local_file_size < server_file_size:
+            print(f"Resuming download for: {file_name}")
+            resume_header = {"Range": f"bytes={local_file_size}-"}
         else:
-            print(f"Partial or corrupted file detected: {file_name}, re-downloading...")
+            print(
+                f"Local file is larger than the server file: {file_name}, re-downloading..."
+            )
+            local_file_size = 0
+            resume_header = None
+    else:
+        local_file_size = 0
+        resume_header = None
 
-    # Download the file with progress bar
-    response = requests.get(file_url, stream=True)
+    # Download the remaining part of the file
+    response = requests.get(file_url, headers=resume_header, stream=True)
 
-    if response.status_code == 200:
-        total_size = int(response.headers.get("content-length", 0))
+    if response.status_code in (
+        200,
+        206,
+    ):  # 206 is for partial content (resumed download)
+        total_size = int(response.headers.get("content-length", 0)) + local_file_size
 
-        with open(file_path, "wb") as file, tqdm(
+        mode = "ab" if resume_header else "wb"
+
+        with open(file_path, mode) as file, tqdm(
             desc=file_name,
             total=total_size,
+            initial=local_file_size,  # Start the progress bar at the local file size
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
@@ -77,9 +93,10 @@ def download_file(file_url, folder):
             for data in response.iter_content(chunk_size=1024):
                 file.write(data)
                 progress_bar.update(len(data))
+
         print(f"Downloaded: {file_name}")
     else:
-        print(f"Failed to download: {file_name}")
+        print(f"Failed to download: {file_name}, Status code: {response.status_code}")
 
 
 # Function to recursively traverse directories and download files
