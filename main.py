@@ -3,12 +3,13 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from tqdm import tqdm
+import time
 
 # URL of the webpage containing the files
-base_url = "https://csar.birds.web.id/v1/CSA_08hx000300h/official-table/table3/"
+base_url = "https://csar.birds.web.id/v1/CSA_08hx000300h/official-table/table2/"
 
 # Directory where files will be saved
-download_directory = "downloaded_files"
+download_directory = "downloaded_files/v1/CSA_08hx000300h/official-table/table2/"
 
 # Create the directory if it doesn't exist
 if not os.path.exists(download_directory):
@@ -39,6 +40,27 @@ def download_file(file_url, folder):
 
     file_path = os.path.join(folder, file_name)
 
+    # Send a HEAD request to get the file size on the server
+    response = requests.head(file_url)
+
+    if response.status_code != 200:
+        print(f"Failed to retrieve file information: {file_url}")
+        return
+
+    # Get the size of the file from the server
+    server_file_size = int(response.headers.get("content-length", 0))
+
+    # Check if the file already exists locally and its size matches
+    if os.path.exists(file_path):
+        local_file_size = os.path.getsize(file_path)
+
+        if local_file_size == server_file_size:
+            print(f"File already fully downloaded: {file_name}, skipping download.")
+            return
+        else:
+            print(f"Partial or corrupted file detected: {file_name}, re-downloading...")
+
+    # Download the file with progress bar
     response = requests.get(file_url, stream=True)
 
     if response.status_code == 200:
