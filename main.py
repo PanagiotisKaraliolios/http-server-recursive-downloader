@@ -12,6 +12,9 @@ base_url = "https://csar.birds.web.id/v1/CSA_08hx00h/"
 # Directory where files will be saved
 download_directory = "downloaded_files/v1/CSA_08hx00h/"
 
+# Define exponential backoff parameter
+backoff_parameter = 4
+
 # Create the directory if it doesn't exist
 if not os.path.exists(download_directory):
     os.makedirs(download_directory)
@@ -191,14 +194,13 @@ def traverse_and_download(url, folder, retries=100):
                 print(
                     f"Failed to access the webpage. Status code: {response.status_code}"
                 )
-                if response.status_code == 503 or response.status_code == 522:
-                    print(f"Server unavailable, retrying after {10**attempt} seconds.")
-                    time.sleep(4**attempt)  # Exponential backoff
-                else:
-                    break
+                print(
+                    f"Server unavailable, retrying after {backoff_parameter**attempt} seconds."
+                )
+                time.sleep(backoff_parameter**attempt)  # Exponential backoff
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
-            time.sleep(4**attempt)  # Exponential backoff
+            time.sleep(backoff_parameter**attempt)  # Exponential backoff
         finally:
             attempt += 1
 
