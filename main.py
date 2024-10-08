@@ -3,13 +3,14 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from tqdm import tqdm
+import keyboard
 import time
 
 # URL of the webpage containing the files
-base_url = "https://csar.birds.web.id/v1/CSA_08hx000300h/official-table/table3/"
+base_url = "https://csar.birds.web.id/v1/CSA_08hx00h/"
 
 # Directory where files will be saved
-download_directory = "downloaded_files/v1/CSA_08hx000300h/official-table/table3/"
+download_directory = "downloaded_files/v1/CSA_08hx00h/"
 
 # Create the directory if it doesn't exist
 if not os.path.exists(download_directory):
@@ -30,8 +31,12 @@ def clean_directory_name(name):
     return cleaned_name
 
 
-# Function to download and save a file with support for resuming
-def download_file(file_url, folder):
+# Function to download and save a file with support for resuming, speed limiting, monitoring speed, and pause/resume
+def download_file(file_url, folder, speed_limit=None):
+    """
+    Downloads a file with optional speed limit (in bytes per second) and pause/resume support.
+    Press 'p' to pause and 'r' to resume.
+    """
     file_name = clean_filename(file_url)
 
     # Skip invalid file names or empty names
@@ -88,19 +93,66 @@ def download_file(file_url, folder):
             unit="B",
             unit_scale=True,
             unit_divisor=1024,
-            leave=False,
+            leave=True,
         ) as progress_bar:
-            for data in response.iter_content(chunk_size=1024):
+            start_time = time.time()
+            bytes_downloaded = 0  # Bytes downloaded within the current time window
+
+            for data in response.iter_content(chunk_size=8192):
                 file.write(data)
                 progress_bar.update(len(data))
+
+                bytes_downloaded += len(data)
+
+                # Monitor download speed every second
+                current_time = time.time()
+                elapsed_time = current_time - start_time
+
+                if elapsed_time >= 1.0:  # Calculate speed every second
+                    speed = bytes_downloaded / elapsed_time  # Speed in bytes per second
+                    speed_kb = speed / 1024  # Speed in KB per second
+
+                    # Update progress bar description with speed
+                    progress_bar.set_description(f"{file_name} [{speed_kb:.2f} KB/s]")
+
+                    # Reset counters for the next time window
+                    start_time = current_time
+                    bytes_downloaded = 0
+
+                # Speed limiting
+                if speed_limit:
+                    time.sleep(
+                        1024 / speed_limit
+                    )  # Sleep to maintain the speed limit in bytes per second
+
+                # Pause/Resume functionality
+                if pause_check():
+                    print(f"\nPaused download for: {file_name}")
+                    # Wait for user to press 'r' to resume
+                    while not resume_check():
+                        time.sleep(1)
+                    print(f"\nResuming download for: {file_name}")
 
         print(f"Downloaded: {file_name}")
     else:
         print(f"Failed to download: {file_name}, Status code: {response.status_code}")
 
 
+# Function to check if the user wants to pause the download
+def pause_check():
+    if keyboard.is_pressed("p"):
+        return True
+    return False
+
+
+def resume_check():
+    if keyboard.is_pressed("r"):
+        return True
+    return False
+
+
 # Function to recursively traverse directories and download files
-def traverse_and_download(url, folder, retries=5):
+def traverse_and_download(url, folder, retries=100):
     attempt = 0
     success = False
     while attempt < retries and not success:
@@ -134,19 +186,19 @@ def traverse_and_download(url, folder, retries=5):
                             os.makedirs(new_folder)
                         traverse_and_download(full_url, new_folder)
                     else:
-                        download_file(full_url, folder)
+                        download_file(full_url, folder, speed_limit=1024 * 100000)
             else:
                 print(
                     f"Failed to access the webpage. Status code: {response.status_code}"
                 )
-                if response.status_code == 503:
-                    print("Server unavailable, retrying...")
-                    time.sleep(2**attempt)  # Exponential backoff
+                if response.status_code == 503 or response.status_code == 522:
+                    print(f"Server unavailable, retrying after {10**attempt} seconds.")
+                    time.sleep(4**attempt)  # Exponential backoff
                 else:
                     break
         except requests.exceptions.RequestException as e:
             print(f"Request failed: {e}")
-            time.sleep(2**attempt)  # Exponential backoff
+            time.sleep(4**attempt)  # Exponential backoff
         finally:
             attempt += 1
 
