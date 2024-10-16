@@ -5,25 +5,40 @@ from urllib.parse import urljoin, urlparse
 from tqdm import tqdm
 import keyboard
 import time
-
-# URL of the webpage containing the files
-base_url = "https://csar.birds.web.id/v1/CSA_B8hxFFh/official-table/combined/"
-
-# Directory where files will be saved
-download_directory = "downloaded_files/v1/CSA_B8hxFFh/official-table/combined/"
+import sys
 
 # Define exponential backoff parameter
 backoff_parameter = 4
 
-# Create the directory if it doesn't exist
-if not os.path.exists(download_directory):
-    os.makedirs(download_directory)
+
+# Main function to execute the script
+def main():
+    # Get the base URL from command line arguments
+    if len(sys.argv) < 2:
+        print("Usage: python script.py <base_url>")
+        sys.exit(1)
+
+    base_url = sys.argv[1]
+
+    # Set download directory based on the URL structure, starting from "downloaded_files" followed by the URL path
+    url_path = urlparse(base_url).path.lstrip("/")
+    download_directory = os.path.join("downloaded_files", url_path)
+
+    # Create the directory if it doesn't exist
+    if not os.path.exists(download_directory):
+        os.makedirs(download_directory)
+        print(f"Created download directory: {download_directory}")
+
+    # Start the recursive download process with retry
+    print(f"Starting recursive download from base URL: {base_url}")
+    traverse_and_download(base_url, download_directory)
 
 
 # Function to clean and validate filenames
 def clean_filename(url):
     parsed_url = urlparse(url)
     filename = os.path.basename(parsed_url.path)
+    print(f"Cleaned filename: {filename}")
     return filename
 
 
@@ -31,11 +46,12 @@ def clean_filename(url):
 def clean_directory_name(name):
     # Remove any dangerous characters like ".." and "/"
     cleaned_name = name.replace("..", "").replace("/", "").replace("\\", "")
+    print(f"Cleaned directory name: {cleaned_name}")
     return cleaned_name
 
 
 # Function to download and save a file with support for resuming, speed limiting, monitoring speed, and pause/resume
-def download_file(file_url, folder, speed_limit=None):
+def download_file(file_url, folder, speed_limit=None, retries=5):
     """
     Downloads a file with optional speed limit (in bytes per second) and pause/resume support.
     Press 'p' to pause and 'r' to resume.
@@ -44,107 +60,118 @@ def download_file(file_url, folder, speed_limit=None):
 
     # Skip invalid file names or empty names
     if not file_name or file_name in [".", ".."]:
+        print(f"Skipping invalid filename: {file_name}")
         return
 
     file_path = os.path.join(folder, file_name)
+    print(f"File path set to: {file_path}")
 
-    # Send a HEAD request to get the total file size on the server
-    response = requests.head(file_url)
+    attempt = 0
+    success = False
 
-    if response.status_code != 200:
-        print(f"Failed to retrieve file information: {file_url}")
-        raise requests.exceptions.RequestException(
-            f"HTTP Error: {response.status_code}"
-        )
-        return
+    while attempt < retries and not success:
+        try:
+            print(f"Attempting to download file: {file_name}, Attempt: {attempt + 1}")
+            # Send a HEAD request to get the total file size on the server
+            response = requests.head(file_url)
 
-    # Get the size of the file from the server
-    server_file_size = int(response.headers.get("content-length", 0))
+            if response.status_code != 200:
+                print(f"Failed to retrieve file information: {file_url}")
+                raise requests.exceptions.RequestException(
+                    f"HTTP Error: {response.status_code}"
+                )
 
-    # Check if the file already exists locally
-    if os.path.exists(file_path):
-        local_file_size = os.path.getsize(file_path)
+            # Get the size of the file from the server
+            server_file_size = int(response.headers.get("content-length", 0))
+            print(f"Server file size: {server_file_size} bytes")
 
-        if local_file_size == server_file_size:
-            print(f"File already fully downloaded: {file_name}, skipping download.")
-            return
-        elif local_file_size < server_file_size:
-            print(f"Resuming download for: {file_name}")
-            resume_header = {"Range": f"bytes={local_file_size}-"}
-        else:
-            print(
-                f"Local file is larger than the server file: {file_name}, re-downloading..."
-            )
-            local_file_size = 0
-            resume_header = None
-    else:
-        local_file_size = 0
-        resume_header = None
+            # Check if the file already exists locally
+            if os.path.exists(file_path):
+                local_file_size = os.path.getsize(file_path)
+                print(f"Local file size: {local_file_size} bytes")
 
-    # Download the remaining part of the file
-    response = requests.get(file_url, headers=resume_header, stream=True)
+                if local_file_size == server_file_size:
+                    print(
+                        f"File already fully downloaded: {file_name}, skipping download."
+                    )
+                    return
+                elif local_file_size < server_file_size:
+                    print(f"Resuming download for: {file_name}")
+                    resume_header = {"Range": f"bytes={local_file_size}-"}
+                else:
+                    print(
+                        f"Local file is larger than the server file: {file_name}, re-downloading..."
+                    )
+                    local_file_size = 0
+                    resume_header = None
+            else:
+                local_file_size = 0
+                resume_header = None
 
-    if response.status_code in (
-        200,
-        206,
-    ):  # 206 is for partial content (resumed download)
-        total_size = int(response.headers.get("content-length", 0)) + local_file_size
+            # Download the remaining part of the file
+            response = requests.get(file_url, headers=resume_header, stream=True)
 
-        mode = "ab" if resume_header else "wb"
+            if response.status_code in (
+                200,
+                206,
+            ):  # 206 is for partial content (resumed download)
+                total_size = (
+                    int(response.headers.get("content-length", 0)) + local_file_size
+                )
+                print(f"Total size to download: {total_size} bytes")
 
-        with open(file_path, mode) as file, tqdm(
-            desc=file_name,
-            total=total_size,
-            initial=local_file_size,  # Start the progress bar at the local file size
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-            leave=True,
-        ) as progress_bar:
-            start_time = time.time()
-            bytes_downloaded = 0  # Bytes downloaded within the current time window
+                mode = "ab" if resume_header else "wb"
 
-            for data in response.iter_content(chunk_size=8192):
-                file.write(data)
-                progress_bar.update(len(data))
+                with open(file_path, mode) as file, tqdm(
+                    desc=file_name,
+                    total=total_size,
+                    initial=local_file_size,  # Start the progress bar at the local file size
+                    unit="B",
+                    unit_scale=True,
+                    unit_divisor=1024,
+                    leave=True,
+                ) as progress_bar:
+                    for data in response.iter_content(chunk_size=8192):
+                        if not data:
+                            continue  # Skip if there's no data
 
-                bytes_downloaded += len(data)
+                        file.write(data)
+                        progress_bar.update(len(data))
 
-                # Monitor download speed every second
-                current_time = time.time()
-                elapsed_time = current_time - start_time
+                        # Speed limiting
+                        if speed_limit:
+                            time.sleep(
+                                1024 / speed_limit
+                            )  # Sleep to maintain the speed limit in bytes per second
 
-                if elapsed_time >= 1.0:  # Calculate speed every second
-                    speed = bytes_downloaded / elapsed_time  # Speed in bytes per second
-                    speed_kb = speed / 1024  # Speed in KB per second
+                        # Pause/Resume functionality
+                        if pause_check():
+                            print(f"\nPaused download for: {file_name}")
+                            # Wait for user to press 'r' to resume
+                            while not resume_check():
+                                time.sleep(1)
+                            print(f"\nResuming download for: {file_name}")
 
-                    # Update progress bar description with speed
-                    progress_bar.set_description(f"{file_name} [{speed_kb:.2f} KB/s]")
+                print(f"Downloaded: {file_name}")
+                success = True  # Mark as successful if no exception occurred
 
-                    # Reset counters for the next time window
-                    start_time = current_time
-                    bytes_downloaded = 0
+            else:
+                raise requests.exceptions.RequestException(
+                    f"Failed to download: {file_name}, Status code: {response.status_code}"
+                )
 
-                # Speed limiting
-                if speed_limit:
-                    time.sleep(
-                        1024 / speed_limit
-                    )  # Sleep to maintain the speed limit in bytes per second
+        except (
+            requests.exceptions.RequestException,
+            requests.exceptions.ConnectionError,
+        ) as e:
+            attempt += 1
+            backoff_time = backoff_parameter**attempt
+            print(f"Attempt {attempt} failed for {file_name}: {e}")
+            print(f"Retrying after {backoff_time} seconds...")
+            time.sleep(backoff_time)
 
-                # Pause/Resume functionality
-                if pause_check():
-                    print(f"\nPaused download for: {file_name}")
-                    # Wait for user to press 'r' to resume
-                    while not resume_check():
-                        time.sleep(1)
-                    print(f"\nResuming download for: {file_name}")
-
-        print(f"Downloaded: {file_name}")
-    else:
-        print(f"Failed to download: {file_name}, Status code: {response.status_code}")
-
-
-# C^&68GF52h@#QY$f2$^b
+    if not success:
+        print(f"Failed to download {file_name} after {retries} attempts.")
 
 
 # Function to check if the user wants to pause the download
@@ -167,21 +194,26 @@ def traverse_and_download(url, folder, retries=100):
     sleep_time = max(10, backoff_parameter**attempt)
     while attempt < retries and not success:
         try:
+            print(f"Accessing URL: {url}, Attempt: {attempt}")
             response = requests.get(url)
             if response.status_code == 200:
                 success = True
+                print(f"Successfully accessed URL: {url}")
                 soup = BeautifulSoup(response.text, "html.parser")
 
                 links = soup.find_all("a")
+                print(f"Found {len(links)} links on the page.")
 
                 for link in links:
                     href = link.get("href")
 
                     # Skip invalid links, directory navigation, and query parameters
                     if not href or href in ["Go up", "..", "/"] or "?" in href:
+                        print(f"Skipping invalid link: {href}")
                         continue
 
                     full_url = urljoin(url, href)
+                    print(f"Processing link: {full_url}")
 
                     if href.endswith("/"):
                         # Clean directory name to avoid issues with ".." or illegal characters
@@ -190,13 +222,16 @@ def traverse_and_download(url, folder, retries=100):
 
                         # Ensure the directory name is valid
                         if not clean_dir_name:
+                            print(f"Invalid directory name after cleaning: {href}")
                             continue
 
                         if not os.path.exists(new_folder):
                             os.makedirs(new_folder)
+                            print(f"Created new folder: {new_folder}")
                         traverse_and_download(full_url, new_folder)
                     else:
                         try:
+                            print(f"Starting download for file: {full_url}")
                             download_file(full_url, folder, speed_limit=1024 * 100000)
                         except Exception as e:
                             print(f"Failed to download file: {full_url}. Error: {e}")
@@ -219,5 +254,5 @@ def traverse_and_download(url, folder, retries=100):
         print(f"Failed to access the webpage after {retries} attempts.")
 
 
-# Start the recursive download process with retry
-traverse_and_download(base_url, download_directory)
+if __name__ == "__main__":
+    main()
