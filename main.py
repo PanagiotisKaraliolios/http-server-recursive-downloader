@@ -176,15 +176,15 @@ def download_file(file_url, folder, speed_limit=None, retries=5):
 
 # Function to check if the user wants to pause the download
 def pause_check():
-    # if keyboard.is_pressed("p"):
-    #     return True
+    if keyboard.is_pressed("p"):
+        return True
     return False
 
 
 def resume_check():
-    # if keyboard.is_pressed("r"):
-    return True
-    # return False
+    if keyboard.is_pressed("r"):
+        return True
+    return False
 
 
 # Function to recursively traverse directories and download files
