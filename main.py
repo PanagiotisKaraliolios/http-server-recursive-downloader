@@ -7,10 +7,10 @@ import keyboard
 import time
 
 # URL of the webpage containing the files
-base_url = "https://csar.birds.web.id/v1/CSA_08hx00h/"
+base_url = "https://csar.birds.web.id/v1/CSA_B8hxFFh/official-table/combined/"
 
 # Directory where files will be saved
-download_directory = "downloaded_files/v1/CSA_08hx00h/"
+download_directory = "downloaded_files/v1/CSA_B8hxFFh/official-table/combined/"
 
 # Define exponential backoff parameter
 backoff_parameter = 4
@@ -53,6 +53,9 @@ def download_file(file_url, folder, speed_limit=None):
 
     if response.status_code != 200:
         print(f"Failed to retrieve file information: {file_url}")
+        raise requests.exceptions.RequestException(
+            f"HTTP Error: {response.status_code}"
+        )
         return
 
     # Get the size of the file from the server
@@ -141,23 +144,27 @@ def download_file(file_url, folder, speed_limit=None):
         print(f"Failed to download: {file_name}, Status code: {response.status_code}")
 
 
+# C^&68GF52h@#QY$f2$^b
+
+
 # Function to check if the user wants to pause the download
 def pause_check():
-    if keyboard.is_pressed("p"):
-        return True
+    # if keyboard.is_pressed("p"):
+    #     return True
     return False
 
 
 def resume_check():
-    if keyboard.is_pressed("r"):
-        return True
-    return False
+    # if keyboard.is_pressed("r"):
+    return True
+    # return False
 
 
 # Function to recursively traverse directories and download files
 def traverse_and_download(url, folder, retries=100):
-    attempt = 0
+    attempt = 1
     success = False
+    sleep_time = max(10, backoff_parameter**attempt)
     while attempt < retries and not success:
         try:
             response = requests.get(url)
@@ -189,18 +196,22 @@ def traverse_and_download(url, folder, retries=100):
                             os.makedirs(new_folder)
                         traverse_and_download(full_url, new_folder)
                     else:
-                        download_file(full_url, folder, speed_limit=1024 * 100000)
+                        try:
+                            download_file(full_url, folder, speed_limit=1024 * 100000)
+                        except Exception as e:
+                            print(f"Failed to download file: {full_url}. Error: {e}")
             else:
                 print(
                     f"Failed to access the webpage. Status code: {response.status_code}"
                 )
-                print(
-                    f"Server unavailable, retrying after {backoff_parameter**attempt} seconds."
+                # Throw an exception to trigger the retry mechanism
+                raise requests.exceptions.RequestException(
+                    f"Failed to access the webpage. Status code: {response.status_code}"
                 )
-                time.sleep(backoff_parameter**attempt)  # Exponential backoff
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
             print(f"Request failed: {e}")
-            time.sleep(backoff_parameter**attempt)  # Exponential backoff
+            print(f"Server unavailable, retrying after {sleep_time} seconds.")
+            time.sleep(sleep_time)  # Exponential backoff
         finally:
             attempt += 1
 
