@@ -13,12 +13,13 @@ backoff_parameter = 4
 
 # Main function to execute the script
 def main():
-    # Get the base URL from command line arguments
-    if len(sys.argv) < 2:
-        print("Usage: python script.py <base_url>")
+    # Get the base URL and max_depth from command line arguments
+    if len(sys.argv) < 3:
+        print("Usage: python script.py <base_url> <max_depth>")
         sys.exit(1)
 
     base_url = sys.argv[1]
+    max_depth = int(sys.argv[2])
 
     # Set download directory based on the URL structure, starting from "downloaded_files" followed by the URL path
     url_path = urlparse(base_url).path.lstrip("/")
@@ -29,9 +30,11 @@ def main():
         os.makedirs(download_directory)
         print(f"Created download directory: {download_directory}")
 
-    # Start the recursive download process with retry
-    print(f"Starting recursive download from base URL: {base_url}")
-    traverse_and_download(base_url, download_directory)
+    # Start the recursive download process with retry and max depth control
+    print(
+        f"Starting recursive download from base URL: {base_url}, max depth: {max_depth}"
+    )
+    traverse_and_download(base_url, download_directory, max_depth, current_depth=0)
 
 
 # Function to clean and validate filenames
@@ -187,14 +190,18 @@ def resume_check():
     return False
 
 
-# Function to recursively traverse directories and download files
-def traverse_and_download(url, folder, retries=100):
+# Function to recursively traverse directories and download files, with max depth control
+def traverse_and_download(url, folder, max_depth, current_depth, retries=100):
+    if current_depth > max_depth:
+        print(f"Max depth reached: {current_depth}, stopping recursion.")
+        return
+
     attempt = 1
     success = False
     sleep_time = max(10, backoff_parameter**attempt)
     while attempt < retries and not success:
         try:
-            print(f"Accessing URL: {url}, Attempt: {attempt}")
+            print(f"Accessing URL: {url}, Attempt: {attempt}, Depth: {current_depth}")
             response = requests.get(url)
             if response.status_code == 200:
                 success = True
@@ -228,7 +235,9 @@ def traverse_and_download(url, folder, retries=100):
                         if not os.path.exists(new_folder):
                             os.makedirs(new_folder)
                             print(f"Created new folder: {new_folder}")
-                        traverse_and_download(full_url, new_folder)
+                        traverse_and_download(
+                            full_url, new_folder, max_depth, current_depth + 1
+                        )
                     else:
                         try:
                             print(f"Starting download for file: {full_url}")
