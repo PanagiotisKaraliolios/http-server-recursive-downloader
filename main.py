@@ -239,11 +239,28 @@ def traverse_and_download(url, folder, max_depth, current_depth, retries=100):
                             full_url, new_folder, max_depth, current_depth + 1
                         )
                     else:
-                        try:
-                            print(f"Starting download for file: {full_url}")
-                            download_file(full_url, folder, speed_limit=1024 * 100000)
-                        except Exception as e:
-                            print(f"Failed to download file: {full_url}. Error: {e}")
+                        # Ask the user whether they want to download the file or skip
+                        user_input = (
+                            input(
+                                f"Do you want to download the file {full_url}? (yes/no): "
+                            )
+                            .strip()
+                            .lower()
+                        )
+
+                        if user_input == "yes":
+                            try:
+                                print(f"Starting download for file: {full_url}")
+                                download_file(
+                                    full_url, folder, speed_limit=1024 * 100000
+                                )
+                            except Exception as e:
+                                print(
+                                    f"Failed to download file: {full_url}. Error: {e}"
+                                )
+                        else:
+                            print(f"Skipping file: {full_url}")
+
             else:
                 print(
                     f"Failed to access the webpage. Status code: {response.status_code}"
